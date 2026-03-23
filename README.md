@@ -1,2 +1,2 @@
 # FINAL PROJECT
-Dedicated Repo - final project: image recognition
+Dedicated Repo - final project: MRI brain tumor_lassification
