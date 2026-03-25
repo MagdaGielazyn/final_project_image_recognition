@@ -11,13 +11,13 @@ import tensorflow as tf
 from collections import Counter
 
 from PIL import Image
-from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score
-from tensorflow.keras import models, layers
+from tensorflow.keras import layers
 from scipy.ndimage import gaussian_filter
 
-# Lista funkcja:
-# Zamiana batched datasetu na pandas DataFrame:
+# Lista funkcji - posortowana alfabetycznie ASC:
+
+# Zamiana batched datasetu na pandas DataFrame
 def batched_dataset_to_df(ds):
     return pd.DataFrame([
         (p.numpy().decode(), int(np.argmax(y.numpy())))
@@ -25,11 +25,12 @@ def batched_dataset_to_df(ds):
         for p, y in zip(ps, y)
     ], columns=["path", "label"])
 
+
 # Sprawdzenie balansu rozkładu klas w zbiorze danych
 def check_balance(df, target):
     df_percentage = df[target].value_counts(normalize=True) * 100
     num = df_percentage.max()
-    if num == 25:
+    if num <= 26:
         descr = "Dane są idealnie zrównoważone."
     elif num <= 35:
         descr = "Dane są dobrze zrównoważone."
@@ -41,8 +42,8 @@ def check_balance(df, target):
         descr = "Silna nierównowaga – zalecane balansowanie danych."
     return descr
 
-# Analiza błędów
 
+# Analiza błędów
 def collect_errors(model, dataset, normalize=False):
     errors = []
 
@@ -63,24 +64,26 @@ def collect_errors(model, dataset, normalize=False):
 
     return errors
 
-# Wczytanie danych z Kaggle i utworzenie datasetów treningowego i testowego:
+
+# Wczytanie danych z Kaggle i utworzenie datasetów treningowego i testowego
 def data_reader(path: str, img_size=(150, 150), batch_size=None):
     dataset_path = kagglehub.dataset_download(path)
     train_dir = os.path.join(dataset_path, "Training")
     test_dir = os.path.join(dataset_path, "Testing")
+
     train_ds = tf.keras.utils.image_dataset_from_directory(
         train_dir,
         image_size=img_size,
         batch_size=batch_size,
-        label_mode="categorical",
-        shuffle=False, ### na razie tak zamiast False zeby sciezki podpiac
+        label_mode="categorical", # Etykiety jako one-hot encoding
+        shuffle=False  # Ścieżki pozostają w oryginalnej kolejności
     )
     test_ds = tf.keras.utils.image_dataset_from_directory(
         test_dir,
         image_size=img_size,
         batch_size=batch_size,
         label_mode="categorical",
-        shuffle=False,
+        shuffle=False
     )
 
     train_paths = tf.data.Dataset.from_tensor_slices(train_ds.file_paths)
@@ -88,9 +91,9 @@ def data_reader(path: str, img_size=(150, 150), batch_size=None):
 
     enriched_train_ds = tf.data.Dataset.zip((train_ds, train_paths))
     enriched_test_ds = tf.data.Dataset.zip((test_ds, test_paths))
-    full_ds=enriched_train_ds.concatenate(enriched_test_ds)
+    full_ds = enriched_train_ds.concatenate(enriched_test_ds)
 
-    categories = set(train_ds.class_names+test_ds.class_names)
+    categories = set(train_ds.class_names + test_ds.class_names)
 
     return (full_ds, categories, train_ds, test_ds)
 
@@ -102,38 +105,39 @@ def dataset_to_df(ds):
         for (image, label), path in ds
     ], columns=["path", "label"])
 
-# Definicja modelu opartego na architekturze EfficientNetB0 z wykorzystaniem transfer learningu
+
+# Definicja modelu EfficientNetB0 z transfer learningiem
 def effNet_model(num_classes=4, input_shape=(150, 150, 3)):
+    base_model = tf.keras.applications.EfficientNetB0(
+        weights="imagenet",       # wczytanie wag wytrenowanych na 1.2M zdjęć, 1000 klas
+        include_top=False,        # odcięcie oryginalnego klasyfikatora ImageNet
+        input_shape=input_shape
+    )
+    base_model.trainable = False  # zamrożenie wszystkich wag bazowych
 
-  base_model = tf.keras.applications.EfficientNetB0(
-      weights="imagenet", # wczytujemy wstępnie wytrenowane wagi na zbiorze ImageNet
-      include_top=False,  # usuwamy oryginalną warstwę klasyfikacyjną (1000 klas)
-      input_shape=input_shape
-  )
+       # Klasyfikator - podejmowanie decyzji
+    x = base_model.output # mapa cech z EfficientNetB0 (4×4×1280 dla 150×150)
+    x = layers.GlobalAveragePooling2D()(x) # agregacja do wektora 1280 wartości
+    x = layers.Dropout(0.3)(x) # regularyzacja, zapobiega overfittingowi
+    outputs = layers.Dense(num_classes, activation="softmax")(x) # 4 prawdopodobieństwa dla 4 klas guza
 
-  base_model.trainable = False # zamrażamy wagi modelu bazowego, aby nie były aktualizowane podczas treningu
-
-# Część klasyfikacyjna dopasowana do problemu
-  x = base_model.output  # przekazujemy dane przez model bazowy (bez uczenia)
-  x = layers.GlobalAveragePooling2D()(x)  # redukujemy mapy cech do jednego wektora
-  x = layers.Dropout(0.3)(x)              # dodajemy dropout w celu redukcji przeuczenia
-  outputs = layers.Dense(num_classes, activation="softmax")(x)  # warstwa wyjściowa dla klasyfikacji wieloklasowej
-
-  return tf.keras.Model(inputs=base_model.input, outputs=outputs)
+    return tf.keras.Model(inputs=base_model.input, outputs=outputs)
 
 
-# Funkcja do wykrywania duplikatów obrazów w datasetach:
+# Wykrywanie duplikatów obrazów w datasetach
 def find_image_duplicates(**kwargs):
     datasets = list(kwargs.values())
+
     def image_hash(image):
-      image_bytes = tf.io.serialize_tensor(image)
-      return hashlib.md5(image_bytes.numpy()).hexdigest()
+        image_bytes = tf.io.serialize_tensor(image)
+        return hashlib.md5(image_bytes.numpy()).hexdigest()
+
     if not datasets:
         return {
-            "Liczba wszystkich obrazów:": 0,
-            "Liczba duplikatów:": 0,
-            "Unikalne obrazy:": 0,
-            "Duplikaty szczegóły:": []
+            "Number of images": 0,
+            "Number of duplicates": 0,
+            "Unique images": 0,
+            "Duplicates details": []
         }
 
     full_ds = datasets[0]
@@ -145,16 +149,14 @@ def find_image_duplicates(**kwargs):
     total_images = 0
 
     for (img, _), path in full_ds:
-      total_images += 1
-      h = image_hash(img)
-      path_str = path.numpy().decode()
+        total_images += 1
+        h = image_hash(img)
+        path_str = path.numpy().decode()
 
-      if h in hash_to_path:
-
-          duplicates.append((path_str, hash_to_path[h]))
-      else:
-
-          hash_to_path[h] = path_str
+        if h in hash_to_path:
+            duplicates.append((path_str, hash_to_path[h]))
+        else:
+            hash_to_path[h] = path_str
 
     return {
         "Number of images": total_images,
@@ -164,13 +166,11 @@ def find_image_duplicates(**kwargs):
     }
 
 
-#Funkcja do generowania tabeli metryk w markdown
-import pandas as pd
-from sklearn.metrics import f1_score
-
+# Generowanie tabeli metryk w markdown
 def generate_markdown_table(cnn_results, effNet_results):
     f1_cnn = f1_score(cnn_results["y_true"], cnn_results["y_pred"], average="macro")
     f1_effNet = f1_score(effNet_results["y_true"], effNet_results["y_pred"], average="macro")
+
     df = pd.DataFrame({
         "Metryka": [
             "Test Accuracy",
@@ -200,34 +200,28 @@ def generate_markdown_table(cnn_results, effNet_results):
 
     return df.to_markdown(index=False)
 
-# Funkcja Grad-CAM do generowania mapy aktywacji
 
+# Generowania mapy aktywacji Grad-CAM
 def make_gradcam_heatmap(model, img_array, last_conv_layer_name):
     grad_model = tf.keras.Model(
         inputs=model.input,
         outputs=[
-            model.get_layer(last_conv_layer_name).output,  # mapy cech
-            model.output  # predykcje
+            model.get_layer(last_conv_layer_name).output,
+            model.output
         ]
     )
 
-    # Rejestracja ścieżki obliczeń
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
         predicted_class = tf.argmax(predictions[0])
         class_score = predictions[:, predicted_class]
 
-    # Obliczenie gradientów
     grads = tape.gradient(class_score, conv_outputs)
-
-    # Uśrednienie gradientów
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
 
-    # Ważenie map cech
     conv_outputs = conv_outputs[0]
     heatmap = tf.reduce_sum(conv_outputs * pooled_grads, axis=-1)
 
-    # Normalizacja
     heatmap = tf.maximum(heatmap, 0)
     if tf.reduce_max(heatmap) > 0:
         heatmap = heatmap / tf.reduce_max(heatmap)
@@ -238,45 +232,40 @@ def make_gradcam_heatmap(model, img_array, last_conv_layer_name):
         float(predictions[0][predicted_class].numpy())
     )
 
-# CNN model definition: konwolucje + pooling + dropout do ekstrakcji cech, Dense + Softmax do klasyfikacji
+
+# Definicja modelu CNN
 def model_cnn(num_classes=4, input_shape=(150, 150, 3)):
-  inputs = tf.keras.Input(shape=input_shape)
+    inputs = tf.keras.Input(shape=input_shape)
 
-  # Encoder
-  x = layers.Conv2D(32, (3,3), activation="relu", padding="same")(inputs)
-  x = layers.BatchNormalization()(x)
-  x = layers.MaxPooling2D((2,2))(x)
-  x = layers.Dropout(0.25)(x)
+    # Encoder - 3 bloki konwolucyjne, każdy blok ten sam wykorzystuje schemat
+    x = layers.Conv2D(32, (3,3), activation="relu", padding="same")(inputs) # wykrywa proste wzorce: krawędzie, gradienty
+    x = layers.BatchNormalization()(x) # stabilizuje uczenie, przyspiesza zbieżność
+    x = layers.MaxPooling2D((2,2))(x) # zmniejsza wymiary przestrzenne: 150×150 → 75×75
+    x = layers.Dropout(0.25)(x) # losowo wyłącza 25% neuronów → zapobiega overfittingowi
 
-  x = layers.Conv2D(64,(3,3), activation="relu", padding="same")(x)
-  x = layers.BatchNormalization()(x)
-  x = layers.MaxPooling2D((2,2))(x)
-  x = layers.Dropout(0.25)(x)
+    x = layers.Conv2D(64,(3,3), activation="relu", padding="same")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2,2))(x)
+    x = layers.Dropout(0.25)(x)
 
-  x = layers.Conv2D(128,(3,3), activation="relu", padding="same")(x)
-  x = layers.BatchNormalization()(x)
-  x = layers.MaxPooling2D((2,2))(x)
-  x = layers.Dropout(0.25)(x)
+    x = layers.Conv2D(128,(3,3), activation="relu", padding="same")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2,2))(x)
+    x = layers.Dropout(0.25)(x)
 
-  # Klasyfikator
-  x = layers.GlobalAveragePooling2D()(x)
-  x = layers.Dense(128, activation="relu")(x)
-  x = layers.Dropout(0.5)(x)
-  outputs = layers.Dense(num_classes, activation="softmax")(x)
+    # Klasyfikator - podejmowanie decyzji
+    x = layers.GlobalAveragePooling2D()(x) # agreguje mapę cech 18×18×128 do wektora 128 wartości (zamiast Flatten() — mniej parametrów, mniejszy overfitting)
+    x = layers.Dense(128, activation="relu")(x) # uczy się kombinacji wykrytych cech
+    x = layers.Dropout(0.5)(x) # wyłącza 50% neuronów — mocniejsza regularyzacja
+    outputs = layers.Dense(num_classes, activation="softmax")(x) # wyjście: 4 prawdopodobieństwa dla 4 klas guza
 
-  return tf.keras.Model(inputs, outputs)
-
-import matplotlib.pyplot as plt
-import math
+    return tf.keras.Model(inputs, outputs)
 
 
-#Wykres accuracy
+# Wykres accuracy
 def plot_accuracy(histories, titles, suptitle):
     n = len(histories)
-
     fig, axes = plt.subplots(1, n, figsize=(7*n, 5))
-
-    # gdy tylko 1 wykres
     if n == 1:
         axes = [axes]
 
@@ -293,7 +282,7 @@ def plot_accuracy(histories, titles, suptitle):
     plt.show()
 
 
-# Wykres rozkładu klas w DataFrame:
+# Dystrybucja klas w zbiorze
 def plot_class_distribution(df, column="label_name", title="Rozkład klas"):
     labels = df[column].value_counts().index.tolist()
     colors = sns.color_palette("Blues", n_colors=len(labels))
@@ -306,25 +295,24 @@ def plot_class_distribution(df, column="label_name", title="Rozkład klas"):
         title=title,
         ylabel=""
     )
-
     plt.show()
 
+# Utworzenie confusion matrix
+def plot_confusion_matrix(y_true, y_pred, class_names, title, cmap, ax):
+    cm = confusion_matrix(y_true, y_pred)
+    ConfusionMatrixDisplay(cm, display_labels=class_names).plot(cmap=cmap, ax=ax)
+    ax.set_title(title)
 
-# Wyświetlenie obrazów z błędnymi predykcjami o najwyższej pewności:
+# Wyświetlenie top błędów
 def plot_top_errors(errors, class_names, model_name="Model", n_show=8):
-
-    # Sortowanie błędów po pewności malejąco
     errors_sorted = sorted(errors, key=lambda e: e["confidence"], reverse=True)
-
     n_show = min(n_show, len(errors_sorted))
     if n_show == 0:
         print(f"Brak błędów do wyświetlenia dla modelu {model_name}.")
         return
 
-    # Tworzenie siatki wykresów (max 4 kolumn)
     n_cols = min(4, n_show)
     n_rows = (n_show + n_cols - 1) // n_cols
-
     plt.figure(figsize=(4*n_cols, 4*n_rows))
 
     for i in range(n_show):
@@ -341,92 +329,79 @@ def plot_top_errors(errors, class_names, model_name="Model", n_show=8):
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.show()
 
-# Wyprintowanie errorów:
+
+# Preprocessing dla CNN
+def preprocess_CNN(data, path):
+    image, label = data
+    image = tf.image.central_crop(image, 0.8)
+    image = tf.image.resize(image, (150, 150))
+    image = image / 255.0
+    image = tf.image.grayscale_to_rgb(tf.image.rgb_to_grayscale(image))
+    return image, label
+
+
+# Preprocessing dla EfficientNet
+def preprocess_effNet(data, path):
+    image, label = data
+    image = tf.image.central_crop(image, 0.8)
+    image = tf.image.resize(image, (150, 150))
+    image = tf.image.grayscale_to_rgb(tf.image.rgb_to_grayscale(image))
+    return image, label
+
+
+# Wyświetlenie errorów w konsoli
 def print_top_errors(errors, class_names, model_name, top_n=5):
     print(f"\n{'='*5} Najczęstsze pomyłki modelu {model_name} {'='*5}\n")
-    print("Format: Prawda → Predykcja\n")  # wyjaśnienie dla czytelnika
-
+    print("Format: Prawda → Predykcja\n")
     for i, ((true, pred), count) in enumerate(
         Counter((class_names[e["true"]], class_names[e["predicted"]]) for e in errors).most_common(top_n), 1
     ):
         print(f"{i}. {true} → {pred}: {count} przypadków")
-    print("\n")  # odstęp po tabeli
+    print("\n")
 
 
-# Usunięcie obrazów ze zbioru na podstawie listy ścieżek:
+# Usunięcie obrazów ze zbioru na podstawie listy ścieżek
 def remove_paths_from_dataset(dataset, paths_to_remove):
     paths_to_remove = tf.constant(paths_to_remove)
+
     def keep_fn(data, path):
         is_equal = tf.reduce_any(tf.equal(paths_to_remove, path))
         return tf.logical_not(is_equal)
 
     return dataset.filter(keep_fn)
-# Funkcja Grad-CAM do generowania mapy aktywacji
 
-def make_gradcam_heatmap(model, img_array, last_conv_layer_name):
-    grad_model = tf.keras.Model(
-        inputs=model.input,
-        outputs=[
-            model.get_layer(last_conv_layer_name).output,  # mapy cech
-            model.output  # predykcje
-        ]
-    )
+#Uruchomienie Grad-CAM
+def run_gradcam(model, dataset, class_names, n=4, normalize_image=False):
+    last_conv_layer = [l.name for l in model.layers if isinstance(l, layers.Conv2D)][-1]
+    sample_x, sample_y = next(iter(dataset))
 
-    # Rejestracja ścieżki obliczeń
-    with tf.GradientTape() as tape:
-        conv_outputs, predictions = grad_model(img_array)
-        predicted_class = tf.argmax(predictions[0])
-        class_score = predictions[:, predicted_class]
+    for i in range(n):
+        img = sample_x[i]
+        true_class = int(np.argmax(sample_y[i].numpy()))
+        img_batch = tf.expand_dims(img, axis=0)
+        heatmap, pred_class, confidence = make_gradcam_heatmap(model, img_batch, last_conv_layer)
+        display_img = img.numpy() / 255.0 if normalize_image else img.numpy()
+        show_gradcam(display_img, heatmap, true_class, pred_class, confidence, class_names)
 
-    # Obliczenie gradientów
-    grads = tape.gradient(class_score, conv_outputs)
-
-    # Uśrednienie gradientów
-    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-
-    # Ważenie map cech
-    conv_outputs = conv_outputs[0]
-    heatmap = tf.reduce_sum(conv_outputs * pooled_grads, axis=-1)
-
-    # Normalizacja
-    heatmap = tf.maximum(heatmap, 0)
-    if tf.reduce_max(heatmap) > 0:
-        heatmap = heatmap / tf.reduce_max(heatmap)
-
-    return (
-        heatmap.numpy(),
-        int(predicted_class.numpy()),
-        float(predictions[0][predicted_class].numpy())
-    )
-
-# Funkcja wyświetlania wyników Grad-CAM
-def show_gradcam(image, heatmap, true_class, pred_class, confidence, class_names):
+# Wyświetlenie wyników Grad-CAM
+def show_gradcam(image, heatmap, true_class, pred_class, confidence, class_names, sigma = 10):
     fig, axes = plt.subplots(1, 3, figsize=(14, 4))
-
-    # Obraz oryginalny
     axes[0].imshow(image)
     axes[0].set_title(f"Oryginał: {class_names[true_class]}", fontsize=10)
     axes[0].axis("off")
 
-    # Wizualizacja mapy aktywacji
-    heatmap_resized = tf.image.resize(
-        heatmap[..., np.newaxis],
-        (image.shape[0], image.shape[1])
-    ).numpy().squeeze()
-
-    # Wygładzenie
-    heatmap_resized = gaussian_filter(heatmap_resized, sigma=10)
-    if heatmap_resized.max() > 0:
-        heatmap_resized = heatmap_resized / heatmap_resized.max()
+    heatmap_resized = tf.image.resize(heatmap[..., np.newaxis], (image.shape[0], image.shape[1])).numpy().squeeze()
+    if sigma > 0:
+        heatmap_resized = gaussian_filter(heatmap_resized, sigma=sigma)
+        if heatmap_resized.max() > 0:
+            heatmap_resized = heatmap_resized / heatmap_resized.max()
 
     axes[1].imshow(heatmap_resized, cmap="jet")
     axes[1].set_title("Mapa Grad-CAM")
     axes[1].axis("off")
 
-    # Nałożenie mapy na obraz
     axes[2].imshow(image)
     axes[2].imshow(heatmap_resized, cmap="jet", alpha=0.4)
-
     is_correct = true_class == pred_class
     axes[2].set_title(
         f"Predykcja: {class_names[pred_class]} ({confidence:.0%})",
@@ -439,7 +414,7 @@ def show_gradcam(image, heatmap, true_class, pred_class, confidence, class_names
     plt.show()
 
 
-# Wyświetlenie obrazów z listy ścieżek:
+# Wyświetlenie obrazów z listy ścieżek
 def show_images(paths, rows=None, cols=None, figsize=(16, 8), update_path=False):
     n = len(paths)
     if rows is None and cols is None:
@@ -452,7 +427,7 @@ def show_images(paths, rows=None, cols=None, figsize=(16, 8), update_path=False)
 
     plt.figure(figsize=figsize)
     if update_path:
-        paths = [path.replace('/kaggle/input/brain-tumor-mri-dataset',update_path) for path in paths]
+        paths = [path.replace('/kaggle/input/brain-tumor-mri-dataset', update_path) for path in paths]
     for i, path in enumerate(paths, 1):
         img = Image.open(path)
         plt.subplot(rows, cols, i)
@@ -462,7 +437,8 @@ def show_images(paths, rows=None, cols=None, figsize=(16, 8), update_path=False)
     plt.tight_layout()
     plt.show()
 
-#  Wizualizacja 12 przykładowych obrazów z testowego zbioru z prawdziwymi i przewidzianymi klasami
+
+# Wizualizacja predykcji modelu
 def show_predictions(model, dataset, class_names, n=12, rows=3, cols=4, figsize=(10,6)):
     x, y = next(iter(dataset))
     pred = np.argmax(model.predict(x, verbose=0), axis=1)
@@ -484,9 +460,10 @@ def show_predictions(model, dataset, class_names, n=12, rows=3, cols=4, figsize=
     plt.tight_layout()
     plt.show()
 
-# Podział datasetu na treningowy, walidacyjny i testowy:
-def split_train_test_ds(dataset, dataset_size,split_ratios={"val":0.15,"test":0.15,"train":0.7}, limit_ds=None):
-    dataset = dataset.shuffle(buffer_size=dataset_size, seed=28) #Dodanie seed, aby zapewnić porównywalność z transfer learningiem
+
+# Podział datasetu na treningowy, walidacyjny i testowy
+def split_train_val_test_ds(dataset, dataset_size, split_ratios={"val":0.15,"test":0.15,"train":0.7}, limit_ds=None):
+    dataset = dataset.shuffle(buffer_size=dataset_size, seed=28)  # Zapewnienie powtarzalności
     train_dataset = dataset.take(int(split_ratios['train']*dataset_size))
     val_dataset = dataset.skip(int(split_ratios['train']*dataset_size)).take(int(split_ratios['val']*dataset_size))
     test_dataset = dataset.skip(int((split_ratios['train']+split_ratios['val'])*dataset_size))
@@ -498,4 +475,5 @@ def split_train_test_ds(dataset, dataset_size,split_ratios={"val":0.15,"test":0.
         train_dataset = train_dataset.take(train_ratio)
         test_dataset = test_dataset.take(test_ratio)
         val_dataset = val_dataset.take(val_ratio)
-    return train_dataset,  val_dataset, test_dataset
+
+    return train_dataset, val_dataset, test_dataset
