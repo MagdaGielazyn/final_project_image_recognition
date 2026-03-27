@@ -371,7 +371,7 @@ def remove_paths_from_dataset(dataset, paths_to_remove):
     return dataset.filter(keep_fn)
 
 #Uruchomienie Grad-CAM
-def run_gradcam(model, dataset, class_names, n=4, normalize_image=False):
+def run_gradcam(model, dataset, class_names, n=4, normalize_image=False, sigma=0):
     last_conv_layer = [l.name for l in model.layers if isinstance(l, layers.Conv2D)][-1]
     sample_x, sample_y = next(iter(dataset))
 
@@ -381,7 +381,7 @@ def run_gradcam(model, dataset, class_names, n=4, normalize_image=False):
         img_batch = tf.expand_dims(img, axis=0)
         heatmap, pred_class, confidence = make_gradcam_heatmap(model, img_batch, last_conv_layer)
         display_img = img.numpy() / 255.0 if normalize_image else img.numpy()
-        show_gradcam(display_img, heatmap, true_class, pred_class, confidence, class_names)
+        show_gradcam(display_img, heatmap, true_class, pred_class, confidence, class_names, sigma=sigma)
 
 # Wyświetlenie wyników Grad-CAM
 def show_gradcam(image, heatmap, true_class, pred_class, confidence, class_names, sigma = 10):
